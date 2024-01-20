@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: fluent-bit
+  name: fluentbit-fluent-bit
   namespace: monitoring
   labels:
     k8s-app: fluent-bit
