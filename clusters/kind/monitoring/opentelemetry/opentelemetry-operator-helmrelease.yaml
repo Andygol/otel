@@ -17,3 +17,4 @@ spec:
   values:
     admissionWebhooks.certManager.autoGenerateCert.enabled: true
     admissionWebhooks.certManager.enabled: false
+    manager.featureGates: operator.autoinstrumentation.go.enabled=true
