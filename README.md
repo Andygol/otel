@@ -392,6 +392,9 @@ loki:
     type: 'filesystem'
 singleBinary:
   replicas: 1
+memberlist:
+  service:
+    publishNotReadyAddresses: true
 EOF
 ```
 
