@@ -417,7 +417,7 @@ metadata:
   namespace: monitoring
 data:
   config.yaml: |
-    auth_enabled: true
+    auth_enabled: false
     common:
       compactor_address: 'loki'
       path_prefix: /var/loki
