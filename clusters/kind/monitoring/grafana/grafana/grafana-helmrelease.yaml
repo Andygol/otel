@@ -1,0 +1,47 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2beta2
+kind: HelmRelease
+metadata:
+  name: grafana
+  namespace: monitoring
+spec:
+  chart:
+    spec:
+      chart: grafana
+      reconcileStrategy: ChartVersion
+      sourceRef:
+        kind: HelmRepository
+        name: grafana
+        namespace: monitoring
+  interval: 1m0s
+  values:
+    datasources:
+      datasources.yaml:
+        apiVersion: 1
+        datasources:
+        - access: proxy
+          basicAuth: false
+          editable: true
+          isDefault: false
+          name: Loki
+          type: loki
+          url: http://loki:3100
+          version: 1
+        - access: proxy
+          basicAuth: false
+          editable: true
+          isDefault: true
+          jsonData:
+            httpMethod: GET
+          name: Prometheus
+          orgId: 1
+          type: prometheus
+          uid: prometheus
+          url: http://prometheus:9090
+          version: 1
+    env:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_FEATURE_TOGGLES_ENABLE: traceqlEditor
+      GF_SERVER_PORT: "3000"
