@@ -27,6 +27,7 @@ spec:
           type: loki
           url: http://loki:3100
           version: 1
+          orgId: 1
         - access: proxy
           basicAuth: false
           editable: true
@@ -37,7 +38,7 @@ spec:
           orgId: 1
           type: prometheus
           uid: prometheus
-          url: http://prometheus:9090
+          url: http://prometheus-server.monitoring.svc
           version: 1
     env:
       GF_AUTH_ANONYMOUS_ENABLED: "true"
