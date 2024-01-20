@@ -499,7 +499,8 @@ datasources:
       type: prometheus
       uid: prometheus
       access: proxy
-      url: http://prometheus:9090
+      # url: http://prometheus:9090
+      url: http://prometheus-server.monitoring.svc
       jsonData:
         httpMethod: GET
       editable: true
