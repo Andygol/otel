@@ -1,0 +1,49 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fluent-bit
+  namespace: monitoring
+  labels:
+    k8s-app: fluent-bit
+data:
+  fluent-bit.conf: |
+    [SERVICE]
+            Flush         1
+            Log_Level     info
+            # Log_Level     error
+            # Allowed values are: off, error, warn, info, debug and trace. 
+            #If 'debug' is set, it will include error, warning, info and debug.
+      
+      inputs: |
+       [INPUT]
+           Name              tail
+           Tag               kube.*
+           Path              /var/log/containers/*.log
+           multiline.parser  docker, cri
+           Refresh_Interval  10
+           Ignore_Older      6h
+           Docker_Mode       On
+           Tag_Regex         (?<kube_namespace>[^_]+)_(?<kube_pod>[^_]+)_(?<kube_container>[^_]+)_(?<kube_id>[^_]+)_(?<kube_name>.*)\.(?<kube_format>log|log\.gz|txt|json|out)$
+           Tag               kube.${kube_namespace}.${kube_pod}.${kube_container}.${kube_id}.${kube_name}.${kube_format}
+      
+      filters: |
+        [FILTER]
+            Name                kubernetes
+            Match               kube.*
+            Merge_Log           On
+            Merge_Log_Key       log_processed
+            
+      outputs: |
+        [OUTPUT]
+            Name            opentelemetry
+            Match           *
+            Host            collector
+            Port            3030
+            metrics_uri     /v1/metrics
+            logs_uri        /v1/logs
+            trace_uri       /v1/traces
+            Log_response_payload True
+            tls             On
+            tls_verify      On
+            add_labels      app fluent-bit
+            add_labels      color blue
