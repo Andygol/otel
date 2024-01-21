@@ -19,6 +19,9 @@ spec:
       containers:
       - name: kbot
         image: denvasyliev/kbot:v1.0.0-otel
+        securityContext:
+          privileged: true
+          runAsUser: 0
         resources:
           limits:
             cpu: 500m
