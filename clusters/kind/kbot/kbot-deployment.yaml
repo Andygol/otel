@@ -14,7 +14,7 @@ spec:
         app: kbot
       annotations:
         instrumentation.opentelemetry.io/inject-go: "true"
-        instrumentation.opentelemetry.io/otel-go-auto-target-exe: "/kbot"   
+        instrumentation.opentelemetry.io/otel-go-auto-target-exe: "/kbot"
     spec:
       containers:
       - name: kbot
@@ -36,4 +36,4 @@ spec:
               name: kbot
               key: token
         - name: METRICS_HOST
-          value: opentelemetry-collector.monitoring.svc.cluster.local:4317
+          value: opentelemetry-collector.monitoring.svc.cluster.local:4318
