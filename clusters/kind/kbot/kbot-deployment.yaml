@@ -12,6 +12,9 @@ spec:
     metadata:
       labels:
         app: kbot
+      annotations:
+        instrumentation.opentelemetry.io/inject-go: "true"
+        instrumentation.opentelemetry.io/otel-go-auto-target-exe: "/kbot"   
     spec:
       containers:
       - name: kbot
