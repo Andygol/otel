@@ -13,8 +13,9 @@ spec:
       labels:
         app: kbot
       annotations:
-        instrumentation.opentelemetry.io/inject-go: "monitoring/opentelemetry-instrumentation"
-        instrumentation.opentelemetry.io/otel-go-auto-target-exe: "/kbot"
+        # instrumentation.opentelemetry.io/inject-go: "monitoring/opentelemetry-instrumentation"
+        # instrumentation.opentelemetry.io/otel-go-auto-target-exe: "/kbot"
+        sidecar.opentelemetry.io/inject: "monitoring/opentelemetry-collector"
     spec:
       containers:
       - name: kbot
