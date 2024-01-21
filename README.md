@@ -530,3 +530,127 @@ flux create helmrelease grafana \
   --values clusters/kind/monitoring/grafana/grafana/grafana-values.yaml \
   --export > clusters/kind/monitoring/grafana/grafana/grafana-helmrelease.yaml
 ```
+
+## Sealed Secrets
+
+```sh
+mkdir -p clusters/kind/sealed-secrets
+```
+
+### Створення HelmRepository для Sealed Secrets
+
+```sh
+flux create source helm sealed-secrets \
+  --url https://bitnami-labs.github.io/sealed-secrets \
+  --export > clusters/kind/sealed-secrets/sealed-secrets-helmrepository.yaml
+```
+
+### Створення HelmRelease для Sealed Secrets
+
+```sh
+flux create helmrelease sealed-secrets \
+  --chart sealed-secrets \
+  --source HelmRepository/sealed-secrets \
+  --target-namespace flux-system \
+  --release-name sealed-secrets-controller \
+  --crds CreateReplace \
+  --chart-version ">=1.15.0-0" \
+  --export > clusters/kind/sealed-secrets/sealed-secrets-helmrelease.yaml
+```
+
+### Встановлення Sealed Secrets
+
+```sh
+brew install kubeseal
+```
+
+### Отримання ключа для Sealed Secrets
+
+```sh
+kubeseal --fetch-cert \
+--controller-name=sealed-secrets-controller \
+--controller-namespace=flux-system \
+> clusters/kind/sealed-secrets/sealed-secrets-cert.pem
+```
+
+## Kbot
+
+```sh
+mkdir -p clusters/kind/kbot
+```
+
+### Створення маніфесту для Kbot
+
+kbot-namspace.yaml
+
+```sh
+cat <<EOF > clusters/kind/kbot/kbot-namespace.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kbot
+EOF
+```
+
+### Створення секрету
+
+```sh
+read -s TELE_TOKEN
+kubectl -n kbot create secret generic kbot \
+--dry-run=client \
+--from-literal=token=$TELE_TOKEN \
+-o yaml > clusters/kind/sealed-secrets/secret.yaml
+```
+
+### Шифрування секрету
+
+```sh
+kubeseal --format=yaml \
+--cert=clusters/kind/sealed-secrets/sealed-secrets-cert.pem \
+< clusters/kind/sealed-secrets/secret.yaml > clusters/kind/sealed-secrets/secret-sealed.yaml
+rm clusters/kind/sealed-secrets/secret.yaml
+```
+
+```sh
+cat <<EOF > clusters/kind/kbot/kbot-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kbot
+  namespace: kbot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kbot
+  template:
+    metadata:
+      labels:
+        app: kbot
+    spec:
+      containers:
+      - name: kbot
+        image: denvasyliev/kbot:v1.0.0-otel
+        resources:
+          limits:
+            cpu: 500m
+            memory: 512Mi
+          requests:
+            cpu: 200m
+            memory: 256Mi
+        env:
+        - name: TELE_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: kbot
+              key: token
+        - name: METRICS_HOST
+          value: "opentelemetry-collector.monitoring.svc:4317"
+EOF
+```
+
+## Відкриваємо порти для доступу до дашбордів
+
+```sh
+kubectl port-forward deployments/grafana 3000:3000 -n monitoring
+```
