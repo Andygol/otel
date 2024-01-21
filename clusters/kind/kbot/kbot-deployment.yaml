@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kbot
+  namespace: kbot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kbot
+  template:
+    metadata:
+      labels:
+        app: kbot
+    spec:
+      containers:
+      - name: kbot
+        image: denvasyliev/kbot:v1.0.0-otel
+        resources:
+          limits:
+            cpu: 500m
+            memory: 512Mi
+          requests:
+            cpu: 200m
+            memory: 256Mi
+        env:
+        - name: TELE_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: kbot
+              key: token
+        - name: METRICS_HOST
+          value: "opentelemetry-collector.monitoring.svc:4317"
