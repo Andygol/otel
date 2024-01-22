@@ -34,13 +34,15 @@ gh repo create --private --source=. --push
 
 ```sh
 flux bootstrap github \
---token-auth \
---owner Andygol \
---repository otel \
---branch main \
---path clusters/kind \
---personal
+  --token-auth \
+  --owner Andygol \
+  --repository otel \
+  --branch main \
+  --path clusters/kind \
+  --personal
+
 Please enter your GitHub personal access token (PAT): 
+
 ► connecting to github.com
 ► cloning branch "main" from Git repository "https://github.com/Andygol/otel.git"
 ✔ cloned repository
@@ -79,12 +81,28 @@ Please enter your GitHub personal access token (PAT):
 git pull origin main
 ```
 
+## Monitoring
+
+Створення теки для моніторингу
+
+```sh
+mkdir -p clusters/kind/monitoring
+```
+
+Створення namespace Monitoring
+
+```sh
+kubectl create namespace monitoring \
+--dry-run=client \
+-o yaml > clusters/kind/monitoring/monitoring-namespace.yaml
+```
+
 ## Встановлення Cert-Manager
 
 Створимо теку для Cert-Manager
 
 ```sh
-mkdir -p clusters/kind/cert-manager
+mkdir -p clusters/kind/monitoring/cert-manager
 ```
 
 Згенеруємо маніфести для розгортання Cert-Manager в кластері kind згідно з інструкцією <https://cert-manager.io/docs/installation/continuous-deployment-and-gitops/>
@@ -94,37 +112,29 @@ mkdir -p clusters/kind/cert-manager
 ```sh
 flux create source helm cert-manager \
 --url https://charts.jetstack.io \
---namespace cert-manager \
---export > clusters/kind/cert-manager/cert-manager-helmrepository.yaml
+--namespace monitoring \
+--export > clusters/kind/monitoring/cert-manager/cert-manager-helmrepository.yaml
 ```
 
 ### HelmRelease
 
 ```sh
-cat <<EOF > clusters/kind/cert-manager/values.yaml
+cat <<EOF > clusters/kind/monitoring/cert-manager/values.yaml
 # values.yaml
 installCRDs: true
 EOF
 ```
 
-values.yaml не додаємо в репозиторій, оскільки він міститься в HelmRelease
+⚠️ values.yaml не додаємо в репозиторій, оскільки він міститься в HelmRelease
 
 ```sh
 flux create helmrelease cert-manager \
---namespace cert-manager \
---source HelmRepository/cert-manager.cert-manager \
+--namespace monitoring \
+--source HelmRepository/cert-manager.monitoring \
 --chart cert-manager \
 --chart-version 1.13.x \
---values ./clusters/kind/cert-manager/values.yaml \
---export > clusters/kind/cert-manager/cert-manager-helmrelease.yaml
-```
-
-### Namespace
-
-```sh
-kubectl create namespace cert-manager \
---dry-run=client \
--o yaml > clusters/kind/cert-manager/cert-manager-namespace.yaml 
+--values ./clusters/kind/monitoring/cert-manager/values.yaml \
+--export > clusters/kind/monitoring/cert-manager/cert-manager-helmrelease.yaml
 ```
 
 Збережемо зміни в репозиторії
@@ -135,22 +145,6 @@ git commit -m "Add cert-manager HelmRelease, HelmRepository, namespace, and valu
 
 This commit adds the necessary YAML files for cert-manager, including the HelmRelease, HelmRepository, namespace, and values.yaml."
 git push origin main
-```
-
-## Monitoring
-
-Створення теки для моніторингу
-
-```sh
-mkdir -p clusters/kind/monitoring
-```
-
-namespace Monitoring
-
-```sh
-kubectl create namespace monitoring \
---dry-run=client \
--o yaml > clusters/kind/monitoring/monitoring-namespace.yaml
 ```
 
 ## Встановлення OpenTelemetry Operator
@@ -178,7 +172,7 @@ manager.featureGates: operator.autoinstrumentation.go
 EOF
 ```
 
-otel-operator-values.yaml не додаємо в репозиторій, оскільки він міститься в HelmRelease
+⚠️ otel-operator-values.yaml не додаємо в репозиторій, оскільки він міститься в HelmRelease
 
 ```sh
 flux create helmrelease opentelemetry-operator \
@@ -189,7 +183,7 @@ flux create helmrelease opentelemetry-operator \
   --export > clusters/kind/monitoring/opentelemetry/opentelemetry-operator-helmrelease.yaml 
 ```
 
-opentelemetry-collector.yaml
+Після створення OpenTelemetry Operator створимо маніфест opentelemetry-collector.yaml
 
 ```sh
 cat <<EOF > clusters/kind/monitoring/opentelemetry/opentelemetry-collector.yaml
@@ -230,6 +224,36 @@ spec:
 EOF
 ```
 
+### Створення інструментарію для OpenTelemetry
+
+(🤔 потреба в створенні інструментарію досліджується, можливо цей маніфест не потрібний)
+
+```sh
+cat <<EOF > clusters/kind/monitoring/opentelemetry/opentelemetry-instrumentation.yaml
+apiVersion: opentelemetry.io/v1alpha1
+kind: Instrumentation
+metadata:
+  name: opentelemetry-instrumentation
+  namespace: monitoring
+spec:
+  exporter:
+    endpoint: http://opentelemetry-collector:4317
+  propagators:
+    - tracecontext
+    - baggage
+  sampler:
+    type: parentbased_traceidratio
+    argument: "1"
+  go:
+    env:
+      # Required if endpoint is set to 4317.
+      # Go autoinstrumentation uses http/proto by default
+      # so data must be sent to 4318 instead of 4317.
+      - name: OTEL_EXPORTER_OTLP_ENDPOINT
+        value: http://opentelemetry-collector:4318
+EOF
+```
+
 ## Fluent Bit
 
 ### Створення HelmRepository для Fluent Bit
@@ -262,52 +286,65 @@ cat <<EOF > clusters/kind/monitoring/fluentbit/fluentbit-configmap.yaml
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: fluent-bit
+  name: fluentbit-fluent-bit
   namespace: monitoring
   labels:
     k8s-app: fluent-bit
 data:
+  custom_parsers.conf: |
+    [PARSER]
+        Name docker_no_time
+        Format json
+        Time_Keep Off
+        Time_Key time
+        Time_Format %Y-%m-%dT%H:%M:%S.%L
   fluent-bit.conf: |
     [SERVICE]
-            Flush         1
-            Log_Level     info
-            # Log_Level     error
-            # Allowed values are: off, error, warn, info, debug and trace. 
-            #If 'debug' is set, it will include error, warning, info and debug.
-      
-      inputs: |
-       [INPUT]
-           Name              tail
-           Tag               kube.*
-           Path              /var/log/containers/*.log
-           multiline.parser  docker, cri
-           Refresh_Interval  10
-           Ignore_Older      6h
-           Docker_Mode       On
-           Tag_Regex         (?<kube_namespace>[^_]+)_(?<kube_pod>[^_]+)_(?<kube_container>[^_]+)_(?<kube_id>[^_]+)_(?<kube_name>.*)\.(?<kube_format>log|log\.gz|txt|json|out)$
-           Tag               kube.${kube_namespace}.${kube_pod}.${kube_container}.${kube_id}.${kube_name}.${kube_format}
-      
-      filters: |
-        [FILTER]
-            Name                kubernetes
-            Match               kube.*
-            Merge_Log           On
-            Merge_Log_Key       log_processed
-            
-      outputs: |
-        [OUTPUT]
-            Name            opentelemetry
-            Match           *
-            Host            collector
-            Port            3030
-            metrics_uri     /v1/metrics
-            logs_uri        /v1/logs
-            trace_uri       /v1/traces
-            Log_response_payload True
-            tls             On
-            tls_verify      On
-            add_labels      app fluent-bit
-            add_labels      color blue
+        Daemon Off
+        Flush 1
+        Log_Level info
+        Parsers_File /fluent-bit/etc/parsers.conf
+        Parsers_File /fluent-bit/etc/conf/custom_parsers.conf
+        HTTP_Server On
+        HTTP_Listen 0.0.0.0
+        HTTP_Port 2020
+        Health_Check On
+
+    [INPUT]
+        Name              tail
+        Path              /var/log/containers/*.log
+        # Exclude_Path      /var/log/containers/*_kube-system_*.log,/var/log/containers/*_logging_*.log,/var/log/containers/*_ingress-nginx_*.log,/var/log/containers/*_kube-node-lease_*.log,/var/log/containers/*_kube-public_*.log,/var/log/containers/*_cert-manager_*.log,/var/log/containers/*_prometheus-operator_*.log
+        multiline.parser  docker, cri
+        Refresh_Interval  10
+        Ignore_Older      6h
+        Docker_Mode       On
+        Tag_Regex         var.log.containers.(?<pod_name>[a-z0-9](?:[-a-z0-9]*[a-z0-9])?(?:\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)_(?<namespace_name>[^_]+)_(?<container_name>.+)-(?<docker_id>[a-z0-9]{64})\.log$
+        Tag               kube.${kube_namespace}.${kube_pod}.${kube_container}.${kube_id}.${kube_name}.${kube_format}
+
+    [INPUT]
+        Name systemd
+        Tag host.*
+        Systemd_Filter _SYSTEMD_UNIT=kubelet.service
+        Read_From_Tail On
+
+    [FILTER]
+        Name kubernetes
+        Match kube.*
+        Merge_Log On
+        Merge_Log_Key log_processed
+        Keep_Log Off
+        K8S-Logging.Parser On
+        K8S-Logging.Exclude On
+
+    [OUTPUT]
+        Name            opentelemetry
+        Match           *
+        Host            opentelemetry-collector
+        Port            3030
+        metrics_uri     /v1/metrics
+        logs_uri        /v1/logs
+        Log_response_payload True
+        tls             off
 EOF
 ```
 
@@ -336,36 +373,371 @@ flux create helmrelease prometheus \
   --export > clusters/kind/monitoring/prometheus/prometheus-helmrelease.yaml
 ```
 
-ConfigMap для Prometheus
+ConfigMap для Prometheus, який містить конфігурацію для збору метрик з OpenTelemetry Collector створюємо з базового маніфесту
 
 ```sh
 cat <<EOF > clusters/kind/monitoring/prometheus/prometheus-configmap.yaml
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: prometheus
+  name: prometheus-server
   namespace: monitoring
   labels:
     k8s-app: prometheus
 data:
   prometheus.yml: |
     global:
-      scrape_interval: 15s 
+      scrape_interval: 15s
       evaluation_interval: 15s
+      scrape_timeout: 10s
+
+    rule_files:
+    - /etc/config/recording_rules.yml
+    - /etc/config/alerting_rules.yml
+    - /etc/config/rules
+    - /etc/config/alerts
 
     scrape_configs:
-      - job_name: otel_collector
-        scrape_interval: 5s
-        static_configs:
-          - targets: ['collector:8889']
+    - job_name: otel_collector
+      scrape_interval: 5s
+      static_configs:
+        - targets: ['collector:8889']
 
-      - job_name: 'prometheus'
-        static_configs:
-          - targets: [ 'localhost:9090' ]
+    - job_name: prometheus
+      static_configs:
+      - targets: [ 'localhost:9090' ]
+
+    - bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      job_name: kubernetes-apiservers
+      kubernetes_sd_configs:
+      - role: endpoints
+      relabel_configs:
+      - action: keep
+        regex: default;kubernetes;https
+        source_labels:
+        - __meta_kubernetes_namespace
+        - __meta_kubernetes_service_name
+        - __meta_kubernetes_endpoint_port_name
+      scheme: https
+      tls_config:
+        ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        insecure_skip_verify: true
+
+    - bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      job_name: kubernetes-nodes
+      kubernetes_sd_configs:
+      - role: node
+      relabel_configs:
+      - action: labelmap
+        regex: __meta_kubernetes_node_label_(.+)
+      - replacement: kubernetes.default.svc:443
+        target_label: __address__
+      - regex: (.+)
+        replacement: /api/v1/nodes/$1/proxy/metrics
+        source_labels:
+        - __meta_kubernetes_node_name
+        target_label: __metrics_path__
+      scheme: https
+      tls_config:
+        ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        insecure_skip_verify: true
+
+    - bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      job_name: kubernetes-nodes-cadvisor
+      kubernetes_sd_configs:
+      - role: node
+      relabel_configs:
+      - action: labelmap
+        regex: __meta_kubernetes_node_label_(.+)
+      - replacement: kubernetes.default.svc:443
+        target_label: __address__
+      - regex: (.+)
+        replacement: /api/v1/nodes/$1/proxy/metrics/cadvisor
+        source_labels:
+        - __meta_kubernetes_node_name
+        target_label: __metrics_path__
+      scheme: https
+      tls_config:
+        ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        insecure_skip_verify: true
+
+    - honor_labels: true
+      job_name: kubernetes-service-endpoints
+      kubernetes_sd_configs:
+      - role: endpoints
+      relabel_configs:
+      - action: keep
+        regex: true
+        source_labels:
+        - __meta_kubernetes_service_annotation_prometheus_io_scrape
+      - action: drop
+        regex: true
+        source_labels:
+        - __meta_kubernetes_service_annotation_prometheus_io_scrape_slow
+      - action: replace
+        regex: (https?)
+        source_labels:
+        - __meta_kubernetes_service_annotation_prometheus_io_scheme
+        target_label: __scheme__
+      - action: replace
+        regex: (.+)
+        source_labels:
+        - __meta_kubernetes_service_annotation_prometheus_io_path
+        target_label: __metrics_path__
+      - action: replace
+        regex: (.+?)(?::\d+)?;(\d+)
+        replacement: $1:$2
+        source_labels:
+        - __address__
+        - __meta_kubernetes_service_annotation_prometheus_io_port
+        target_label: __address__
+      - action: labelmap
+        regex: __meta_kubernetes_service_annotation_prometheus_io_param_(.+)
+        replacement: __param_$1
+      - action: labelmap
+        regex: __meta_kubernetes_service_label_(.+)
+      - action: replace
+        source_labels:
+        - __meta_kubernetes_namespace
+        target_label: namespace
+      - action: replace
+        source_labels:
+        - __meta_kubernetes_service_name
+        target_label: service
+      - action: replace
+        source_labels:
+        - __meta_kubernetes_pod_node_name
+        target_label: node
+
+    - honor_labels: true
+      job_name: kubernetes-service-endpoints-slow
+      kubernetes_sd_configs:
+      - role: endpoints
+      relabel_configs:
+      - action: keep
+        regex: true
+        source_labels:
+        - __meta_kubernetes_service_annotation_prometheus_io_scrape_slow
+      - action: replace
+        regex: (https?)
+        source_labels:
+        - __meta_kubernetes_service_annotation_prometheus_io_scheme
+        target_label: __scheme__
+      - action: replace
+        regex: (.+)
+        source_labels:
+        - __meta_kubernetes_service_annotation_prometheus_io_path
+        target_label: __metrics_path__
+      - action: replace
+        regex: (.+?)(?::\d+)?;(\d+)
+        replacement: $1:$2
+        source_labels:
+        - __address__
+        - __meta_kubernetes_service_annotation_prometheus_io_port
+        target_label: __address__
+      - action: labelmap
+        regex: __meta_kubernetes_service_annotation_prometheus_io_param_(.+)
+        replacement: __param_$1
+      - action: labelmap
+        regex: __meta_kubernetes_service_label_(.+)
+      - action: replace
+        source_labels:
+        - __meta_kubernetes_namespace
+        target_label: namespace
+      - action: replace
+        source_labels:
+        - __meta_kubernetes_service_name
+        target_label: service
+      - action: replace
+        source_labels:
+        - __meta_kubernetes_pod_node_name
+        target_label: node
+      scrape_interval: 5m
+      scrape_timeout: 30s
+
+    - honor_labels: true
+      job_name: prometheus-pushgateway
+      kubernetes_sd_configs:
+      - role: service
+      relabel_configs:
+      - action: keep
+        regex: pushgateway
+        source_labels:
+        - __meta_kubernetes_service_annotation_prometheus_io_probe
+
+    - honor_labels: true
+      job_name: kubernetes-services
+      kubernetes_sd_configs:
+      - role: service
+      metrics_path: /probe
+      params:
+        module:
+        - http_2xx
+      relabel_configs:
+      - action: keep
+        regex: true
+        source_labels:
+        - __meta_kubernetes_service_annotation_prometheus_io_probe
+      - source_labels:
+        - __address__
+        target_label: __param_target
+      - replacement: blackbox
+        target_label: __address__
+      - source_labels:
+        - __param_target
+        target_label: instance
+      - action: labelmap
+        regex: __meta_kubernetes_service_label_(.+)
+      - source_labels:
+        - __meta_kubernetes_namespace
+        target_label: namespace
+      - source_labels:
+        - __meta_kubernetes_service_name
+        target_label: service
+
+    - honor_labels: true
+      job_name: kubernetes-pods
+      kubernetes_sd_configs:
+      - role: pod
+      relabel_configs:
+      - action: keep
+        regex: true
+        source_labels:
+        - __meta_kubernetes_pod_annotation_prometheus_io_scrape
+      - action: drop
+        regex: true
+        source_labels:
+        - __meta_kubernetes_pod_annotation_prometheus_io_scrape_slow
+      - action: replace
+        regex: (https?)
+        source_labels:
+        - __meta_kubernetes_pod_annotation_prometheus_io_scheme
+        target_label: __scheme__
+      - action: replace
+        regex: (.+)
+        source_labels:
+        - __meta_kubernetes_pod_annotation_prometheus_io_path
+        target_label: __metrics_path__
+      - action: replace
+        regex: (\d+);(([A-Fa-f0-9]{1,4}::?){1,7}[A-Fa-f0-9]{1,4})
+        replacement: '[$2]:$1'
+        source_labels:
+        - __meta_kubernetes_pod_annotation_prometheus_io_port
+        - __meta_kubernetes_pod_ip
+        target_label: __address__
+      - action: replace
+        regex: (\d+);((([0-9]+?)(\.|$)){4})
+        replacement: $2:$1
+        source_labels:
+        - __meta_kubernetes_pod_annotation_prometheus_io_port
+        - __meta_kubernetes_pod_ip
+        target_label: __address__
+      - action: labelmap
+        regex: __meta_kubernetes_pod_annotation_prometheus_io_param_(.+)
+        replacement: __param_$1
+      - action: labelmap
+        regex: __meta_kubernetes_pod_label_(.+)
+      - action: replace
+        source_labels:
+        - __meta_kubernetes_namespace
+        target_label: namespace
+      - action: replace
+        source_labels:
+        - __meta_kubernetes_pod_name
+        target_label: pod
+      - action: drop
+        regex: Pending|Succeeded|Failed|Completed
+        source_labels:
+        - __meta_kubernetes_pod_phase
+      - action: replace
+        source_labels:
+        - __meta_kubernetes_pod_node_name
+        target_label: node
+
+    - honor_labels: true
+      job_name: kubernetes-pods-slow
+      kubernetes_sd_configs:
+      - role: pod
+      relabel_configs:
+      - action: keep
+        regex: true
+        source_labels:
+        - __meta_kubernetes_pod_annotation_prometheus_io_scrape_slow
+      - action: replace
+        regex: (https?)
+        source_labels:
+        - __meta_kubernetes_pod_annotation_prometheus_io_scheme
+        target_label: __scheme__
+      - action: replace
+        regex: (.+)
+        source_labels:
+        - __meta_kubernetes_pod_annotation_prometheus_io_path
+        target_label: __metrics_path__
+      - action: replace
+        regex: (\d+);(([A-Fa-f0-9]{1,4}::?){1,7}[A-Fa-f0-9]{1,4})
+        replacement: '[$2]:$1'
+        source_labels:
+        - __meta_kubernetes_pod_annotation_prometheus_io_port
+        - __meta_kubernetes_pod_ip
+        target_label: __address__
+      - action: replace
+        regex: (\d+);((([0-9]+?)(\.|$)){4})
+        replacement: $2:$1
+        source_labels:
+        - __meta_kubernetes_pod_annotation_prometheus_io_port
+        - __meta_kubernetes_pod_ip
+        target_label: __address__
+      - action: labelmap
+        regex: __meta_kubernetes_pod_annotation_prometheus_io_param_(.+)
+        replacement: __param_$1
+      - action: labelmap
+        regex: __meta_kubernetes_pod_label_(.+)
+      - action: replace
+        source_labels:
+        - __meta_kubernetes_namespace
+        target_label: namespace
+      - action: replace
+        source_labels:
+        - __meta_kubernetes_pod_name
+        target_label: pod
+      - action: drop
+        regex: Pending|Succeeded|Failed|Completed
+        source_labels:
+        - __meta_kubernetes_pod_phase
+      - action: replace
+        source_labels:
+        - __meta_kubernetes_pod_node_name
+        target_label: node
+      scrape_interval: 5m
+      scrape_timeout: 30s
+
+    alerting:
+      alertmanagers:
+      - kubernetes_sd_configs:
+          - role: pod
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        relabel_configs:
+        - source_labels: [__meta_kubernetes_namespace]
+          regex: monitoring
+          action: keep
+        - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_instance]
+          regex: prometheus
+          action: keep
+        - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+          regex: alertmanager
+          action: keep
+        - source_labels: [__meta_kubernetes_pod_container_port_number]
+          regex: "9093"
+          action: keep
+
 EOF
 ```
 
 ## Grafana + Loki
+
+Створимо теки для Grafana + Loki
 
 ```sh
 mkdir -p clusters/kind/monitoring/grafana/{grafana,loki}
@@ -409,7 +781,7 @@ flux create helmrelease loki \
   --export > clusters/kind/monitoring/grafana/loki/loki-helmrelease.yaml
 ```
 
-ConfigMap для Loki
+ConfigMap для Loki створюємо з базового маніфесту
 
 ```sh
 cat <<EOF > clusters/kind/monitoring/grafana/loki/loki-configmap.yaml
@@ -579,7 +951,7 @@ kubeseal --fetch-cert \
 mkdir -p clusters/kind/kbot
 ```
 
-### Створення маніфесту для Kbot
+### Створення namespace для Kbot
 
 kbot-namspace.yaml
 
@@ -611,6 +983,8 @@ kubeseal --format=yaml \
 rm clusters/kind/sealed-secrets/secret.yaml
 ```
 
+### Створюємо маніфесту для розгортання Kbot
+
 ```sh
 cat <<EOF > clusters/kind/kbot/kbot-deployment.yaml
 apiVersion: apps/v1
@@ -627,10 +1001,20 @@ spec:
     metadata:
       labels:
         app: kbot
+      annotations:
+        # instrumentation.opentelemetry.io/inject-go: "monitoring/opentelemetry-instrumentation"
+        # instrumentation.opentelemetry.io/otel-go-auto-target-exe: "/kbot"
+        sidecar.opentelemetry.io/inject: "monitoring/opentelemetry-collector"
     spec:
       containers:
       - name: kbot
         image: denvasyliev/kbot:v1.0.0-otel
+        securityContext:
+          capabilities:
+            add:
+              - SYS_PTRACE
+          privileged: true
+          runAsUser: 0
         resources:
           limits:
             cpu: 500m
@@ -645,12 +1029,24 @@ spec:
               name: kbot
               key: token
         - name: METRICS_HOST
-          value: "opentelemetry-collector.monitoring.svc:4317"
+          value: opentelemetry-collector.monitoring.svc.cluster.local:4318
 EOF
 ```
 
-## Відкриваємо порти для доступу до дашбордів
+Всі маніфести мають бути збережені в репозиторій після чого Flux автоматично розгорне їх в кластері kind
+
+## Дашборад
+
+### Відкриваємо порти для доступу до дашбордів
+
+```sh
+kubectl port-forward service/grafana 3000:80 -n monitoring 
+```
+
+або
 
 ```sh
 kubectl port-forward deployments/grafana 3000:3000 -n monitoring
 ```
+
+Переходимо за посиланням <http://localhost:3000> для роботи з дашбордом Grafana.
