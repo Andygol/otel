@@ -318,8 +318,8 @@ data:
         Refresh_Interval  10
         Ignore_Older      6h
         Docker_Mode       On
-        Tag_Regex         var.log.containers.(?<pod_name>[a-z0-9](?:[-a-z0-9]*[a-z0-9])?(?:\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)_(?<namespace_name>[^_]+)_(?<container_name>.+)-(?<docker_id>[a-z0-9]{64})\.log$
-        Tag               kube.${kube_namespace}.${kube_pod}.${kube_container}.${kube_id}.${kube_name}.${kube_format}
+        Tag_Regex         (?<pod_name>[^_]+)_(?<namespace_name>[^_]+)_(?<container_name>[^_]+)-(?<docker_id>[a-z0-9]{64})\.log
+        Tag               <pod_name>_<namespace_name>_<container_name>-<docker_id>
 
     [INPUT]
         Name systemd
@@ -345,6 +345,7 @@ data:
         logs_uri        /v1/logs
         Log_response_payload True
         tls             off
+
 EOF
 ```
 
