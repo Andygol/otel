@@ -228,7 +228,7 @@ EOF
 
 ```sh
 cat <<EOF > clusters/kind/monitoring/opentelemetry/opentelemetry-collector-sidecar.yaml
-apiVersion: apps/v1
+apiVersion: opentelemetry.io/v1alpha1
 kind: OpenTelemetryCollector
 metadata:
   name: opentelemetry-sidecar
