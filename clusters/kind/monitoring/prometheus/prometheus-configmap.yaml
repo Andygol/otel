@@ -22,7 +22,7 @@ data:
     - job_name: otel_collector
       scrape_interval: 5s
       static_configs:
-        - targets: ['collector:8889']
+        - targets: ['opentelemetry-collector:8889']
 
     - job_name: prometheus
       static_configs:
