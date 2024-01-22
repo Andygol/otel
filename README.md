@@ -183,7 +183,7 @@ flux create helmrelease opentelemetry-operator \
   --export > clusters/kind/monitoring/opentelemetry/opentelemetry-operator-helmrelease.yaml 
 ```
 
-Після створення OpenTelemetry Operator створимо маніфест opentelemetry-collector.yaml
+Після створення OpenTelemetry Operator створимо маніфест opentelemetry-collector.yaml який збирає логи з кластера
 
 ```sh
 cat <<EOF > clusters/kind/monitoring/opentelemetry/opentelemetry-collector.yaml
@@ -224,7 +224,48 @@ spec:
 EOF
 ```
 
-### Створення інструментарію для OpenTelemetry
+Створення sidecar для OpenTelemetry Collector
+
+```sh
+cat <<EOF > clusters/kind/monitoring/opentelemetry/opentelemetry-collector-sidecar.yaml
+apiVersion: apps/v1
+kind: OpenTelemetryCollector
+metadata:
+  name: opentelemetry-sidecar
+  namespace: monitoring
+spec:
+  mode: sidecar
+  config: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: "0.0.0.0:4317"
+          http:
+            endpoint: "0.0.0.0:3030"
+
+    exporters:
+      logging:
+      loki:
+        endpoint: http://loki:3100/loki/api/v1/push
+      prometheus:
+        endpoint: "0.0.0.0:8889"
+
+    service:
+      pipelines:
+        logs:
+          receivers: [otlp]
+          exporters: [loki]
+        traces:
+          receivers: [otlp]
+          exporters: [logging]
+        metrics:
+          receivers: [otlp]
+          exporters: [logging,prometheus]
+EOF
+```
+
+### Варіант зі створення інструментарію для OpenTelemetry
 
 (🤔 потреба в створенні інструментарію досліджується, можливо цей маніфест не потрібний)
 
@@ -253,6 +294,8 @@ spec:
         value: http://opentelemetry-collector:4318
 EOF
 ```
+
+> Please note that the Go executable you're trying to instrument must be built with the `-buildmode=pie` flag, and the image must have the `libgo-pie.so` shared library.
 
 ## Fluent Bit
 
@@ -1005,7 +1048,7 @@ spec:
       annotations:
         # instrumentation.opentelemetry.io/inject-go: "monitoring/opentelemetry-instrumentation"
         # instrumentation.opentelemetry.io/otel-go-auto-target-exe: "/kbot"
-        sidecar.opentelemetry.io/inject: "monitoring/opentelemetry-collector"
+        sidecar.opentelemetry.io/inject: "monitoring/opentelemetry-sidecar"
     spec:
       containers:
       - name: kbot
