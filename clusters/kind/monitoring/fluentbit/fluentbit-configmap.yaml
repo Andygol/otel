@@ -34,7 +34,7 @@ data:
         Ignore_Older      6h
         Docker_Mode       On
         Tag_Regex         var.log.containers.(?<pod_name>[a-z0-9](?:[-a-z0-9]*[a-z0-9])?(?:\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)_(?<namespace_name>[^_]+)_(?<container_name>.+)-(?<docker_id>[a-z0-9]{64})\.log$
-        Tag               kube.${kube_namespace}.${kube_pod}.${kube_container}.${kube_id}.${kube_name}.${kube_format}
+        Tag               kube.var.log.containers.${pod_name}.${namespace_name}.${container_name}.${docker_id}
 
     [INPUT]
         Name systemd
