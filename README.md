@@ -1030,7 +1030,7 @@ spec:
               name: kbot
               key: token
         - name: METRICS_HOST
-          value: opentelemetry-collector.monitoring.svc.cluster.local:4318
+          value: opentelemetry-collector.monitoring.svc.cluster.local:4317
 EOF
 ```
 
